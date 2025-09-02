@@ -64,47 +64,46 @@ const sendMessage = async (req, res) => {
   */
 
   try {
-    const { chatId, content, contentType, options, mediaFromURLOptions = {} } = req.body
+    const { chatId, content, contentType, options = {}, mediaFromURLOptions = {} } = req.body
     const client = sessions.get(req.params.sessionId)
+    const sendOptions = { waitUntilMsgSent: true, ...options }
 
     let messageOut
     switch (contentType) {
       case 'string':
-        if (options?.media) {
-          const { mimetype, data, filename = null, filesize = null } = options.media
+        if (sendOptions?.media) {
+          const { mimetype, data, filename = null, filesize = null } = sendOptions.media
           if (!mimetype || !data) {
             return sendErrorResponse(res, 400, 'invalid media options')
           }
-          options.media = new MessageMedia(mimetype, data, filename, filesize)
+          sendOptions.media = new MessageMedia(mimetype, data, filename, filesize)
         }
-        messageOut = await client.sendMessage(chatId, content, options)
+        messageOut = await client.sendMessage(chatId, content, sendOptions)
         break
       case 'MessageMediaFromURL': {
         const messageMediaFromURL = await MessageMedia.fromUrl(content, { unsafeMime: true, ...mediaFromURLOptions })
-        messageOut = await client.sendMessage(chatId, messageMediaFromURL, options)
+        messageOut = await client.sendMessage(chatId, messageMediaFromURL, sendOptions)
         break
       }
       case 'MessageMedia': {
         const messageMedia = new MessageMedia(content.mimetype, content.data, content.filename, content.filesize)
-        messageOut = await client.sendMessage(chatId, messageMedia, options)
+        messageOut = await client.sendMessage(chatId, messageMedia, sendOptions)
         break
       }
       case 'Location': {
         const location = new Location(content.latitude, content.longitude, content.description)
-        messageOut = await client.sendMessage(chatId, location, options)
+        messageOut = await client.sendMessage(chatId, location, sendOptions)
         break
       }
       case 'Contact': {
         const contactId = content.contactId.endsWith('@c.us') ? content.contactId : `${content.contactId}@c.us`
         const contact = await client.getContactById(contactId)
-        messageOut = await client.sendMessage(chatId, contact, options)
+        messageOut = await client.sendMessage(chatId, contact, sendOptions)
         break
       }
       case 'Poll': {
         const poll = new Poll(content.pollName, content.pollOptions, content.options)
-        messageOut = await client.sendMessage(chatId, poll, options)
-        // fix for poll events not being triggered (open the chat that you sent the poll)
-        await client.interface.openChatWindow(chatId)
+        messageOut = await client.sendMessage(chatId, poll, sendOptions)
         break
       }
       default:
@@ -1319,7 +1318,7 @@ const unpinChat = async (req, res) => {
 
 const setProfilePicture = async (req, res) => {
   /*
-    #swagger.summary = 'Set the current user's profile picture'
+    #swagger.summary = 'Set the current user\'s profile picture'
     #swagger.requestBody = {
       required: true,
       schema: {
@@ -1812,6 +1811,356 @@ const setBackgroundSync = async (req, res) => {
   }
 }
 
+/**
+ * Retrieve the contact lid and phone number for a specific chat.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.body.chatId - The unique identifier of the chat to unmute.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const getContactLidAndPhone = async (req, res) => {
+  /*
+    #swagger.summary = 'Get contact lid and phone'
+    #swagger.description = 'Retrieve the contact lid and phone number for a specific chat'
+    #swagger.requestBody = {
+      required: true,
+      schema: {
+        type: 'object',
+        properties: {
+          userIds: {
+            type: 'array',
+            items: {
+              type: 'string',
+              description: 'The unique identifier of the user',
+            },
+            example: ['6281288888888@c.us']
+          },
+        }
+      },
+    }
+  */
+  try {
+    const { userIds = [] } = req.body
+    const client = sessions.get(req.params.sessionId)
+    const result = await client.getContactLidAndPhone(userIds)
+    res.json({ success: true, data: result })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
+/**
+ * Gets all cached Channel instances.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const getChannels = async (req, res) => {
+  /*
+    #swagger.summary = 'Get channels from the client'
+    #swagger.description = 'Retrieve a list of channels from the client'
+  */
+  try {
+    const client = sessions.get(req.params.sessionId)
+    const result = await client.getChannels()
+    res.json({ success: true, result })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
+/**
+ * Creates a new channel.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const createChannel = async (req, res) => {
+  /*
+    #swagger.summary = 'Create a new channel',
+    #swagger.requestBody = {
+      required: true,
+      schema: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'The title of the channel',
+            example: 'My New Channel'
+          },
+          options: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                description: 'The description of the channel',
+                example: 'This is my new channel'
+              },
+            }
+          }
+        }
+      },
+    }
+  */
+  try {
+    const { title, options } = req.body
+    const client = sessions.get(req.params.sessionId)
+    const result = options ? await client.createChannel(title, options) : await client.createChannel(title)
+    res.json({ success: true, result })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
+/**
+ * Subscribes to a new channel.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const subscribeToChannel = async (req, res) => {
+  /*
+    #swagger.summary = 'Subscribe to a channel',
+    #swagger.requestBody = {
+      required: true,
+      schema: {
+        type: 'object',
+        properties: {
+          channelId: {
+            type: 'string',
+            description: 'The ID of the channel',
+            example: 'XXXXXXXXXX@newsletter'
+          },
+        }
+      },
+    }
+  */
+  try {
+    const { channelId } = req.body
+    const client = sessions.get(req.params.sessionId)
+    const result = await client.subscribeToChannel(channelId)
+    res.json({ success: true, result })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
+/**
+ * Unsubscribe from a channel.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const unsubscribeFromChannel = async (req, res) => {
+  /*
+    #swagger.summary = 'Unsubscribe from channel',
+    #swagger.requestBody = {
+      required: true,
+      schema: {
+        type: 'object',
+        properties: {
+          channelId: {
+            type: 'string',
+            description: 'The ID of the channel',
+            example: 'XXXXXXXXXX@newsletter'
+          },
+          options: {
+            type: 'object',
+            properties: {
+              deleteLocalModels: {
+                type: 'boolean',
+                example: true
+              },
+            }
+          }
+        }
+      },
+    }
+  */
+  try {
+    const { channelId, options } = req.body
+    const client = sessions.get(req.params.sessionId)
+    const result = options ? await client.unsubscribeFromChannel(channelId, options) : await client.unsubscribeFromChannel(channelId)
+    res.json({ success: true, result })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
+/**
+ * Search channels.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const searchChannels = async (req, res) => {
+  /*
+    #swagger.summary = 'Search channels',
+    #swagger.requestBody = {
+      required: true,
+      schema: {
+        type: 'object',
+        properties: {
+          searchOptions: {
+            properties: {
+              searchText: {
+                type: 'string',
+                description: 'The text to search for in channel names',
+                example: ''
+              },
+              countryCodes: {
+                type: 'array',
+                description: 'An array of country codes in ISO 3166-1 alpha-2 standard to search',
+                example: ['US', 'CA']
+              },
+              skipSubscribedNewsletters: {
+                type: 'boolean',
+                description: 'If true, channels that user is subscribed to won\'t appear in found channels',
+                example: true
+              },
+              view: {
+                type: 'number',
+                description: 'The category of channels to get',
+                example: 0
+              },
+              limit: {
+                type: 'number',
+                description: 'The maximum number of channels to return',
+                example: 10
+              }
+            }
+          }
+        }
+      },
+    }
+  */
+  try {
+    const { searchOptions = {} } = req.body
+    const client = sessions.get(req.params.sessionId)
+    const foundChannels = await client.searchChannels(searchOptions)
+    res.json({ success: true, result: foundChannels })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
+/**
+ * Gets a Channel instance by invite code.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.body.inviteCode - The unique identifier of the channel to retrieve.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const getChannelByInviteCode = async (req, res) => {
+  /*
+    #swagger.summary = 'Get channel by invite code'
+    #swagger.requestBody = {
+      required: true,
+      schema: {
+        type: 'object',
+        properties: {
+          inviteCode: {
+            type: 'string',
+            description: 'The code that comes after the \"https://whatsapp.com/channel/\"',
+          },
+        }
+      },
+    }
+  */
+  try {
+    const { inviteCode } = req.body
+    const client = sessions.get(req.params.sessionId)
+    const result = await client.getChannelByInviteCode(inviteCode)
+    res.json({ success: true, result })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
+/**
+ * Executes a method on the client associated with the given sessionId.
+ *
+ * @async
+ * @function
+ * @param {Object} req - The HTTP request object containing the chatId and sessionId.
+ * @param {string} req.params.sessionId - The unique identifier of the session associated with the client to use.
+ * @param {Object} res - The HTTP response object.
+ * @returns {Promise<Object>} - A Promise that resolves with a JSON object containing a success flag and the result of the operation.
+ * @throws {Error} - If an error occurs during the operation, it is thrown and handled by the catch block.
+ */
+const runMethod = async (req, res) => {
+  /*
+    #swagger.summary = 'Execute a method on the client'
+    #swagger.description = 'Execute a method on the client and return the result'
+    #swagger.requestBody = {
+      required: true,
+      schema: {
+        type: 'object',
+        properties: {
+          method: {
+            type: 'string',
+            description: 'The name of the method to execute',
+            example: 'getLabels'
+          },
+          options: {
+            anyOf: [
+              { type: 'object' },
+              { type: 'string' }
+            ],
+            description: 'The options to pass to the method',
+          }
+        }
+      },
+    }
+  */
+  try {
+    const { method, options } = req.body
+    const client = sessions.get(req.params.sessionId)
+    if (typeof client[method] !== 'function') {
+      throw new Error('Method is not implemented')
+    }
+    const result = options ? await client[method](options) : await client[method]()
+    res.json({ success: true, data: result })
+  } catch (error) {
+    sendErrorResponse(res, 500, error.message)
+  }
+}
+
 module.exports = {
   getClassInfo,
   acceptInvite,
@@ -1860,5 +2209,13 @@ module.exports = {
   openChatWindow,
   openChatWindowAt,
   resetState,
-  setBackgroundSync
+  setBackgroundSync,
+  getContactLidAndPhone,
+  getChannels,
+  getChannelByInviteCode,
+  createChannel,
+  subscribeToChannel,
+  unsubscribeFromChannel,
+  searchChannels,
+  runMethod
 }
